@@ -3,50 +3,55 @@ name: Devin IDE
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: devin-ide-release
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: ubuntu-latest
-
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    env:
+      VERSION: 3.11.216
+      INSTALLER: DevinUserSetup-x64-3.11.216.exe
+      DOWNLOAD_URL: https://windsurf-stable.codeiumdata.com/win32-x64-user/stable/d70b4713dfeaf856a4d8a35b35eac0c86e07af07/DevinUserSetup-x64-3.11.216.exe
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - name: Download official Windows x64 installer
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 --connect-timeout 30 --max-time 900 \
+            --output "$INSTALLER" "$DOWNLOAD_URL"
+          test -s "$INSTALLER"
+          test "$(head -c 2 "$INSTALLER")" = 'MZ'
+          sha256sum "$INSTALLER" > "$INSTALLER.sha256"
+
+      - name: Upload downloadable Actions artifact
+        uses: actions/upload-artifact@v7
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          name: devin-windows-x64-${{ env.VERSION }}
+          path: |
+            ${{ env.INSTALLER }}
+            ${{ env.INSTALLER }}.sha256
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
 
-      - name: Fetch all tags
-        run: git fetch --tags
-
-      - name: Get latest tag and set next tag
-        id: version
-        run: |
-          # Get the latest tag matching v1.*
-          latest_tag=$(git tag --list "v1.*" --sort=-v:refname | head -n 1)
-          if [ -z "$latest_tag" ]; then
-            next_tag="v1.0.0"
-          else
-            # Extract the version numbers
-            IFS='.' read -r major minor patch <<<"${latest_tag#v}"
-            patch=$((patch + 1))
-            next_tag="v${major}.${minor}.${patch}"
-          fi
-          echo "Next tag: $next_tag"
-          echo "TAG_NAME=$next_tag" >> $GITHUB_ENV
-      - name: Configure Git
-        run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
-      - name: Create and push Git tag
-        run: |
-          git tag $TAG_NAME
-          git push origin $TAG_NAME
-      - name: Download Windsurf Installer
-        run: |
-          curl -L -o DevinUserSetup-x64-3.11.216.exe \
-          https://windsurf-stable.codeiumdata.com/win32-x64-user/stable/d70b4713dfeaf856a4d8a35b35eac0c86e07af07/DevinUserSetup-x64-3.11.216.exe
-      - name: Upload to GitHub Release
+      - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ env.TAG_NAME }}
-          files: WindsurfUserSetup-x64-3.11.216.exe
+          tag_name: v${{ env.VERSION }}
+          target_commitish: ${{ github.sha }}
+          name: Devin Desktop ${{ env.VERSION }} - Windows x64
+          body: Official Windows x64 installer downloaded from the Devin release CDN. No source compilation or installer modification is performed.
+          fail_on_unmatched_files: true
+          files: |
+            ${{ env.INSTALLER }}
+            ${{ env.INSTALLER }}.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
